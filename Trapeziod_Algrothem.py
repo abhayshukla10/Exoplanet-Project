@@ -10,28 +10,15 @@ KEPLER_LONG_CADENCE_DAYS = 29.4 / 60.0 / 24.0  # ~0.0204 d, one Kepler long-cade
 def trapezoid_model(phase, H, depth, T_dur, T_flat,t0=0.0):
     ingress_duration = (T_dur - T_flat) / 2.0 # downward slope duration
     engress_duration = (T_dur - T_flat) / 2.0 # upward slope duration
+    x = np.abs(phase - t0 + 0.5) % 1 - 0.5 # Calculate the absolute phase difference from the transit center
     
-    t1 = t0 - T_dur / 2.0 # Transit start time
-    t2 = t1 + ingress_duration #Ingress end time, Flat start time
-    t3 = t2 + T_flat # Flat end time, Egress start time 
-    t4 = t0 + T_dur / 2.0 #Transit end time
+    half_duration = T_dur / 2.0 # Half of the total transit duration
+    half_flat = T_flat / 2.0 # Half of the flat bottom duration
+    ingress = half_duration - half_flat # Start of the ingress phase
     
-    phase_wrapped = phase % 1.0
-    
-    flux_model = np.full_like(phase_wrapped, H, dtype=float)  
-    # ingress phase
-    if ingress_duration > 0:
-        ingress_mask = (phase_wrapped >= t1) & (phase_wrapped < t2)
-        flux_model[ingress_mask] = H - depth * (phase_wrapped[ingress_mask] - t1) / ingress_duration
-    # flat phase
-    flat_mask = (phase_wrapped >= t2) & (phase_wrapped < t3)
-    flux_model[flat_mask] = H - depth
-    #
-    if engress_duration > 0:
-        engress_mask = (phase_wrapped >= t3) & (phase_wrapped < t4)
-        flux_model[engress_mask] = H - depth * (t4 - phase_wrapped[engress_mask]) / engress_duration
-
-    return flux_model
+    if ingress <= 0:
+        return np.where(x < half_duration, H - depth, H) # Return a flat model if ingress is non-positive
+    return H - depth * np.clip((half_duration - x) / ingress, 0.0, 1.0)
 
 def log_likelihood_ta(params, phase, flux, flux_err):
     H, depth, T_dur, T_flat = params # Unpack the parameters
