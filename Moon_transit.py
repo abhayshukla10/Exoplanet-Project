@@ -1,20 +1,18 @@
-from pathlib import Path
-
 import numpy as np
 import matplotlib.pyplot as plt
 import emcee
 
-def trapezoid_model(phase, H, depth, T_dur, T_flat, t0=0.0):
-    x = np.abs((phase - t0 + 0.5) % 1.0 - 0.5);
+# def trapezoid_model(phase, H, depth, T_dur, T_flat, t0=0.0):
+#     x = np.abs((phase - t0 + 0.5) % 1.0 - 0.5);
 
-    half_dur, half_flat = T_dur / 2.0, T_flat / 2.0
-    ingress = half_dur - half_flat
+#     half_dur, half_flat = T_dur / 2.0, T_flat / 2.0
+#     ingress = half_dur - half_flat
 
-    # T_flat == T_dur: top-hat transit
-    if ingress <= 0:
-        return np.where(x <= half_dur, H - depth, H)
+#     # T_flat == T_dur: top-hat transit
+#     if ingress <= 0:
+#         return np.where(x <= half_dur, H - depth, H)
 
-    return H - depth * np.clip((half_dur - x) / ingress, 0.0, 1.0)
+#     return H - depth * np.clip((half_dur - x) / ingress, 0.0, 1.0)
 
 def transit_model(t, t0, P, H, depth, T_dur, T_flat):
 
