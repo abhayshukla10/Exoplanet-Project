@@ -48,25 +48,41 @@ def log_posterior(params, phase, flux, flux_err, real_period_days=None):
     else:
         raise ValueError(f"Unexpected number of parameters: {n_params}")
     return lp + ll
-def metropolis_hastings(initial_params, phase, flux, flux_err, step_sizes, n_sizes, n_steps=10000, verbose = True, real_peroid_days=None):
-    n_params = len(initial_params) # Number of parameters
-    chain = np.zeros((n_steps, n_params)) # Array with columns for each parameter and rows for each step
-    current_params = initial_params.copy() # Set the current parameters to the initial parameters
-    current_log_posterior = log_posterior(current_params, phase, flux, flux_err) # Calculate the log posterior for the current parameters
-    n_accepted = 0 # Initialize the number of accepted steps
-    for i in range(n_steps): # Loop over the number of steps
-        proposal = current_params + np.random.normal(0, step_sizes) # add randon value to each parameter based on the step size
-        proposal_log_posterior = log_posterior(proposal, phase, flux, flux_err) # Calculate the log posterior for the proposed parameters
-        log_acceptance_ratio = proposal_log_posterior - current_log_posterior # Calculate the log acceptance ratio
+def metropolis_hastings(initial_params, phase, flux, flux_err, step_sizes,
+                        n_steps=10000, verbose=True, real_period_days=None):
+    # [FIX 5] 'real_peroid_days' was misspelled AND never forwarded, so the
+    # 6-parameter path always got None. Both call sites below now pass it.
+    # [FIX 7] n_sizes was a required argument that was never used -- removed.
+    initial_params = np.asarray(initial_params, dtype=float)
+    n_params = len(initial_params)
+    chain = np.zeros((n_steps, n_params))
+    current_params = initial_params.copy()
+    current_log_posterior = log_posterior(current_params, phase, flux,
+                                          flux_err, real_period_days)
+
+    # [FIX 6] If the start point is outside the prior, both posteriors are
+    # -inf, their difference is NaN, and every comparison against NaN is
+    # False. The chain then sits frozen and returns a constant array with a
+    # perfectly innocent-looking 0% acceptance rate. Fail loudly instead.
+    if not np.isfinite(current_log_posterior):
+        raise ValueError("initial_params has zero posterior probability; "
+                         "the chain cannot start. Check them against the prior.")
+
+    n_accepted = 0
+    for i in range(n_steps):
+        proposal = current_params + np.random.normal(0, step_sizes)
+        proposal_log_posterior = log_posterior(proposal, phase, flux,
+                                               flux_err, real_period_days)
+        log_acceptance_ratio = proposal_log_posterior - current_log_posterior
         if np.log(np.random.uniform()) < log_acceptance_ratio:
-            current_params = proposal  # ✓ New guess becomes current
+            current_params = proposal
             current_log_posterior = proposal_log_posterior
-            n_accepted += 1  # Increment the number of accepted steps
-        chain[i] = current_params  # Store the current parameters in the chain
-        if (i+1)% 1000 == 0: # Print the progress every 1000 steps
+            n_accepted += 1
+        chain[i] = current_params
+        if verbose and (i + 1) % 1000 == 0:
             print(f"Step {i+1}/{n_steps}, Acceptance Rate: {n_accepted/(i+1)*100:.1f}%")
-    acceptance_rate = n_accepted / n_steps # Calculate the acceptance rate
-    return chain, acceptance_rate # Return the chain and the acceptance rate
+
+    return chain, n_accepted / n_steps
 def plot_trace_ta(chain, param_names=['H', 'depth', 'T_dur', 'T_flat']):
     fig, axes = plt.subplots(4, 1, figsize=(10, 8))
     for i, (ax, name) in enumerate(zip(axes, param_names)):
