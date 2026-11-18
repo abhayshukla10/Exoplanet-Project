@@ -141,26 +141,45 @@ def log_likelihood_ld(params, phase, flux, flux_err, real_period_days):
     return log_likelihood_value
 
  
-def log_prior_ld(params):
+def log_likelihood_ld(params, phase, flux, flux_err, real_period_days):
+    """[NEW] Same chi-squared, limb-darkened model."""
     rp, a, inc, u1, u2, H = params
-    if (0 < rp < 0.5 and 1.0 < a < 100.0 and 60.0 < inc <= 90.0
-            and 0 <= u1 <= 1 and 0 <= u2 <= 1 and (u1 + u2) < 1.0
-            and 0.5 < H < 1.5):
-        return 0.0  # Uniform prior (log(1) = 0)
-    else:
-        return -np.inf  
+    if real_period_days is None:
+        raise ValueError("limb-darkened fit needs real_period_days "
+                         "(for the exposure-smearing correction)")
+    model_flux = limbdark_model(phase, rp, a, inc, u1, u2, H, real_period_days)
+    residuals = flux - model_flux
+    return -0.5 * np.sum((residuals / flux_err) ** 2) 
     
-def plot_trace_ld(chain, param_names=['rp', 'a', 'inc', 'u1', 'u2', 'H']):
-    fig, axes = plt.subplots(6, 1, figsize=(10, 12))
-    for i, (ax, name) in enumerate(zip(axes, param_names)):
-        ax.plot(chain[:, i], lw=0.5, alpha=0.7)
-        ax.set_ylabel(name)
-        ax.set_xlabel("Iteration")
-        ax.set_title(f"Trace: {name}")
- 
-    plt.tight_layout()
-    plt.savefig("ld_mcmc_trace.png", dpi=130)
-    plt.show()
+def log_prior_ld(params):
+    """[NEW] Uniform priors plus the two constraints that actually matter."""
+    rp, a, inc, u1, u2, H = params
+
+    if not (0.0 < rp < 0.5):
+        return -np.inf
+    if not (1.0 < a < 100.0):
+        return -np.inf
+    if not (0.0 < inc <= 90.0):
+        return -np.inf
+    if not (0.5 < H < 1.5):
+        return -np.inf
+
+    # GEOMETRY. With 'a' free, most of the prior volume describes orbits
+    # where the planet never crosses the disc at all. There the likelihood
+    # is perfectly flat, so a random walk that wanders in has nothing
+    # pulling it back out. Requiring an actual transit is what keeps the
+    # chain in the region where the data has something to say.
+    b = a * np.cos(np.radians(inc))
+    if b >= 1.0 + rp:
+        return -np.inf
+
+    # PHYSICALITY. u1, u2 must keep the intensity positive and decreasing
+    # outward across the whole disc. This triangle is the standard
+    # condition for the quadratic law.
+    if not (u1 >= 0.0 and u1 + u2 < 1.0 and u1 + 2.0 * u2 > 0.0):
+        return -np.inf
+
+    return 0.0
     
 def plot_posterior_ld(chain, burn_in=2000):
     chain_burned = chain[burn_in:] # Discard the burn-in samples
