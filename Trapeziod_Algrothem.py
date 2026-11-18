@@ -160,29 +160,73 @@ def plot_posterior_ta(chain, burn_in=2000, param_names=None,
 
 
 
-def plot_trapezoid(phase, flux_data, chain, burn_in=2000):
-    chain_burned = chain[burn_in:]
-    best_params = np.median(chain_burned, axis=0)
-    H, depth, T_dur, T_flat = best_params
-    model = trapezoid_model(phase, H, depth, T_dur, T_flat)
-    residuals = flux_data - model
+def plot_trapezoid(phase, flux_data, chain, burn_in=2000,
+                  real_period_days=None, trapezoid_chain=None,
+                  filename="mcmc_best_fit.png"):
+    """Data, best-fit model, and residuals. Works for either model.
+
+    Pass trapezoid_chain as well when plotting a 6-parameter fit and both
+    curves are drawn together -- that side-by-side comparison is the whole
+    point of the exercise.
+    """
+    n_params = chain.shape[1]
+    best = np.median(chain[burn_in:], axis=0)
     order = np.argsort(phase)
-    fig, axes = plt.subplots(2, 1, figsize=(12, 8))
- 
+
+    if n_params == 4:
+        H, depth, T_dur, T_flat = best
+        model = trapezoid_model(phase, H, depth, T_dur, T_flat)
+        title = f'Trapezoid  (H={H:.4f}, depth={depth:.5f})'
+    else:
+        if real_period_days is None:
+            raise ValueError("real_period_days is required for the 6-parameter model")
+        rp, a, inc, u1, u2, H = best
+        model = limbdark_model(phase, rp, a, inc, u1, u2, H, real_period_days)
+        title = (f'Limb-darkened  (rp={rp:.4f}, a={a:.2f}, inc={inc:.2f}, '
+                 f'b={a*np.cos(np.radians(inc)):.3f}, u1={u1:.3f}, u2={u2:.3f})')
+
+    residuals = flux_data - model
+    fig, axes = plt.subplots(2, 1, figsize=(12, 8), sharex=True)
+
     axes[0].scatter(phase[order], flux_data[order], s=4, alpha=0.4, label='Data')
-    axes[0].plot(phase[order], model[order], 'r-', lw=2, label='Trapezoidal Model')
+    axes[0].plot(phase[order], model[order], 'r-', lw=2,
+                 label='Limb-darkened' if n_params == 6 else 'Trapezoid')
+
+    if n_params == 6 and trapezoid_chain is not None:
+        Ht, dt, Tdt, Tft = np.median(trapezoid_chain[burn_in:], axis=0)
+        axes[0].plot(phase[order], trapezoid_model(phase, Ht, dt, Tdt, Tft)[order],
+                     'g--', lw=1.5, alpha=0.8, label='Trapezoid')
+
     axes[0].set_ylabel('Flux')
-    axes[0].set_title(f'Best-Fit Trapezoidal Model (H={H:.4f}, depth={depth:.4f})')
+    axes[0].set_title(title)
     axes[0].legend()
     axes[0].grid(True, alpha=0.3)
- 
+
     axes[1].scatter(phase[order], residuals[order], s=4, alpha=0.4, color='gray')
+
+    # Binned residuals. At Kepler scatter the limb-darkening bowl is buried
+    # in the point cloud; binning is what makes it visible, and this panel
+    # exists specifically to show it.
+    nb = 60
+    edges = np.linspace(phase.min(), phase.max(), nb + 1)
+    idx = np.digitize(phase, edges) - 1
+    centres = 0.5 * (edges[:-1] + edges[1:])
+    binned = np.array([residuals[idx == k].mean() if np.any(idx == k) else np.nan
+                       for k in range(nb)])
+    axes[1].plot(centres, binned, 'o-', color='crimson', ms=3, lw=1,
+                 label='binned mean')
+
     axes[1].axhline(0, color='k', lw=1)
     axes[1].set_xlabel('Phase')
     axes[1].set_ylabel('Residual')
-    axes[1].set_title('Residuals: Look for systematic structure (e.g., bowl shape from limb darkening)')
+    axes[1].set_title('Residuals (binned, to reveal systematic structure)')
+    axes[1].legend()
     axes[1].grid(True, alpha=0.3)
- 
+
+    print(f"residual rms: {np.std(residuals)*1e6:.0f} ppm")
+
     plt.tight_layout()
-    plt.savefig("mcmc_best_fit.png", dpi=130)
+    plt.savefig(filename, dpi=130)
     plt.show()
+
+
