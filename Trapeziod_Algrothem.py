@@ -36,18 +36,18 @@ def log_prior_ta(params):
 def log_posterior(params, phase, flux, flux_err, real_period_days=None):
     n_params = len(params)
     if n_params == 4:
-        lp = log_prior_ta(params) # Calculate the log prior
-        if not np.isfinite(lp): # Check if the log prior is finite
-            return -np.inf  # Return negative infinity for invalid values
-        ll = log_likelihood_ta(params, phase, flux, flux_err) # Calculate the log likelihood
-    elif n_params == 6:
-        lp = LimbDarkening_Algrothem.log_prior_ld(params)
+        lp = log_prior_ta(params)
         if not np.isfinite(lp):
             return -np.inf
-        ll = LimbDarkening_Algrothem.log_likelihood_ld(params, phase, flux, flux_err, real_period_days)
+        ll = log_likelihood_ta(params, phase, flux, flux_err)
+    elif n_params == 6:
+        lp = log_prior_ld(params)
+        if not np.isfinite(lp):
+            return -np.inf
+        ll = log_likelihood_ld(params, phase, flux, flux_err, real_period_days)
     else:
         raise ValueError(f"Unexpected number of parameters: {n_params}")
-    return lp + ll  # Return the sum of the log prior and log likelihood
+    return lp + ll
 def metropolis_hastings(initial_params, phase, flux, flux_err, step_sizes, n_sizes, n_steps=10000, verbose = True, real_peroid_days=None):
     n_params = len(initial_params) # Number of parameters
     chain = np.zeros((n_steps, n_params)) # Array with columns for each parameter and rows for each step
