@@ -83,39 +83,66 @@ def metropolis_hastings(initial_params, phase, flux, flux_err, step_sizes,
             print(f"Step {i+1}/{n_steps}, Acceptance Rate: {n_accepted/(i+1)*100:.1f}%")
 
     return chain, n_accepted / n_steps
-def plot_trace_ta(chain, param_names=['H', 'depth', 'T_dur', 'T_flat']):
-    fig, axes = plt.subplots(4, 1, figsize=(10, 8))
-    for i, (ax, name) in enumerate(zip(axes, param_names)):
+
+TRAP_NAMES = ['H', 'depth', 'T_dur', 'T_flat']
+LD_NAMES = ['rp', 'a', 'inc', 'u1', 'u2', 'H']
+
+
+def _names_for(n_params, param_names=None):
+    if param_names is not None:
+        return param_names
+    if n_params == 4:
+        return TRAP_NAMES
+    if n_params == 6:
+        return LD_NAMES
+    raise ValueError(f"Unexpected number of parameters: {n_params}")
+
+
+def plot_trace_ta(chain, param_names=None, filename="mcmc_trace.png"):
+    n_params = chain.shape[1]
+    param_names = _names_for(n_params, param_names)
+    fig, axes = plt.subplots(n_params, 1, figsize=(10, 2 * n_params), sharex=True)
+    for i, (ax, name) in enumerate(zip(np.atleast_1d(axes), param_names)):
         ax.plot(chain[:, i], lw=0.5, alpha=0.7)
         ax.set_ylabel(name)
-        ax.set_xlabel("Iteration")
         ax.set_title(f"Trace: {name}")
- 
+    np.atleast_1d(axes)[-1].set_xlabel("Iteration")
     plt.tight_layout()
-    plt.savefig("mcmc_trace.png", dpi=130)
+    plt.savefig(filename, dpi=130)
     plt.show()
-def plot_posterior_ta(chain, burn_in=2000):
-    chain_burned = chain[burn_in:] # Discard the burn-in samples
-    fig, axes = plt.subplots(2, 2, figsize=(10, 8)) # Create a 2x2 grid of subplots
-    param_names = ['H', 'depth', 'T_dur', 'T_flat'] # Parameter names
-    for i, (ax, name) in enumerate(zip(axes.flatten(), param_names)):
-        ax.hist(chain_burned[:, i], bins=30, density=True, alpha=0.7)
-        median = np.median(chain_burned[:, i]) # Calculate the median of the parameter
-        lower = np.percentile(chain_burned[:, i], 16) # Calculate the 16th percentile
-        upper = np.percentile(chain_burned[:, i], 84) # Calculate the 84th percentile
- 
-        ax.axvline(median, color='r', linestyle='--', lw=2, label=f'Median: {median:.4f}')
-        ax.axvline(lower, color='orange', linestyle='--', lw=1.5, alpha=0.7)
-        ax.axvline(upper, color='orange', linestyle='--', lw=1.5, alpha=0.7)
- 
-        ax.set_xlabel(name)
-        ax.set_ylabel('Frequency')
-        ax.set_title(f'Posterior: {name}')
-        ax.legend()
+
+
+def plot_posterior_ta(chain, burn_in=2000, param_names=None,
+                      filename="mcmc_posterior.png"):
+    chain_burned = chain[burn_in:]
+    n_params = chain.shape[1]
+    param_names = _names_for(n_params, param_names)
+
+    rows, cols = (2, 2) if n_params == 4 else (2, 3)
+    fig, axes = plt.subplots(rows, cols, figsize=(10 if n_params == 4 else 14, 8))
+    axes = axes.flatten()
+
+    for i, name in enumerate(param_names):
+        axes[i].hist(chain_burned[:, i], bins=30, density=True, alpha=0.7)
+        median = np.median(chain_burned[:, i])
+        lower = np.percentile(chain_burned[:, i], 16)
+        upper = np.percentile(chain_burned[:, i], 84)
+        axes[i].axvline(median, color='r', linestyle='--', lw=2,
+                        label=f'Median: {median:.4f}')
+        axes[i].axvline(lower, color='orange', linestyle='--', lw=1.5, alpha=0.7)
+        axes[i].axvline(upper, color='orange', linestyle='--', lw=1.5, alpha=0.7)
+        axes[i].set_xlabel(name)
+        axes[i].set_ylabel('Probability density')
+        axes[i].set_title(f'Posterior: {name}')
+        axes[i].legend()
+
+    for j in range(len(param_names), len(axes)):
+        axes[j].axis('off')
+
     plt.tight_layout()
-    plt.savefig("mcmc_posterior.png", dpi=130)
+    plt.savefig(filename, dpi=130)
     plt.show()
-    print("Posterior Summary:")
+
     print("\n" + "=" * 50)
     print("MCMC RESULTS (after burn-in)")
     print("=" * 50)
@@ -124,6 +151,82 @@ def plot_posterior_ta(chain, burn_in=2000):
         lower = np.percentile(chain_burned[:, i], 16)
         upper = np.percentile(chain_burned[:, i], 84)
         print(f"{name:8s} = {median:.6f} + {upper - median:.6f} - {median - lower:.6f}")
+
+    if n_params == 6:
+        b = chain_burned[:, 1] * np.cos(np.radians(chain_burned[:, 2]))
+        print(f"{'b':8s} = {np.median(b):.6f} "
+              f"+ {np.percentile(b,84)-np.median(b):.6f} "
+              f"- {np.median(b)-np.percentile(b,16):.6f}   (derived)")
+
+
+def plot_best_fit(phase, flux_data, chain, burn_in=2000,
+                  real_period_days=None, trapezoid_chain=None,
+                  filename="mcmc_best_fit.png"):
+    """Data, best-fit model, and residuals. Works for either model.
+
+    Pass trapezoid_chain as well when plotting a 6-parameter fit and both
+    curves are drawn together -- that side-by-side comparison is the whole
+    point of the exercise.
+    """
+    n_params = chain.shape[1]
+    best = np.median(chain[burn_in:], axis=0)
+    order = np.argsort(phase)
+
+    if n_params == 4:
+        H, depth, T_dur, T_flat = best
+        model = trapezoid_model(phase, H, depth, T_dur, T_flat)
+        title = f'Trapezoid  (H={H:.4f}, depth={depth:.5f})'
+    else:
+        if real_period_days is None:
+            raise ValueError("real_period_days is required for the 6-parameter model")
+        rp, a, inc, u1, u2, H = best
+        model = limbdark_model(phase, rp, a, inc, u1, u2, H, real_period_days)
+        title = (f'Limb-darkened  (rp={rp:.4f}, a={a:.2f}, inc={inc:.2f}, '
+                 f'b={a*np.cos(np.radians(inc)):.3f}, u1={u1:.3f}, u2={u2:.3f})')
+
+    residuals = flux_data - model
+    fig, axes = plt.subplots(2, 1, figsize=(12, 8), sharex=True)
+
+    axes[0].scatter(phase[order], flux_data[order], s=4, alpha=0.4, label='Data')
+    axes[0].plot(phase[order], model[order], 'r-', lw=2,
+                 label='Limb-darkened' if n_params == 6 else 'Trapezoid')
+
+    if n_params == 6 and trapezoid_chain is not None:
+        Ht, dt, Tdt, Tft = np.median(trapezoid_chain[burn_in:], axis=0)
+        axes[0].plot(phase[order], trapezoid_model(phase, Ht, dt, Tdt, Tft)[order],
+                     'g--', lw=1.5, alpha=0.8, label='Trapezoid')
+
+    axes[0].set_ylabel('Flux')
+    axes[0].set_title(title)
+    axes[0].legend()
+    axes[0].grid(True, alpha=0.3)
+
+    axes[1].scatter(phase[order], residuals[order], s=4, alpha=0.4, color='gray')
+
+    # Binned residuals. At Kepler scatter the limb-darkening bowl is buried
+    # in the point cloud; binning is what makes it visible, and this panel
+    # exists specifically to show it.
+    nb = 60
+    edges = np.linspace(phase.min(), phase.max(), nb + 1)
+    idx = np.digitize(phase, edges) - 1
+    centres = 0.5 * (edges[:-1] + edges[1:])
+    binned = np.array([residuals[idx == k].mean() if np.any(idx == k) else np.nan
+                       for k in range(nb)])
+    axes[1].plot(centres, binned, 'o-', color='crimson', ms=3, lw=1,
+                 label='binned mean')
+
+    axes[1].axhline(0, color='k', lw=1)
+    axes[1].set_xlabel('Phase')
+    axes[1].set_ylabel('Residual')
+    axes[1].set_title('Residuals (binned, to reveal systematic structure)')
+    axes[1].legend()
+    axes[1].grid(True, alpha=0.3)
+
+    print(f"residual rms: {np.std(residuals)*1e6:.0f} ppm")
+
+    plt.tight_layout()
+    plt.savefig(filename, dpi=130)
+    plt.show()
 def plot_trapezoid(phase, flux_data, chain, burn_in=2000):
     chain_burned = chain[burn_in:]
     best_params = np.median(chain_burned, axis=0)
