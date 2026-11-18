@@ -23,22 +23,16 @@ def trapezoid_model(phase, H, depth, T_dur, T_flat,t0=0.0):
     return H - depth * np.clip((half_duration - x) / ingress, 0.0, 1.0)
 
 def log_likelihood_ta(params, phase, flux, flux_err):
-    H, depth, T_dur, T_flat = params # Unpack the parameters
-    if depth <= 0 or depth > H or T_flat < 0 or T_flat > T_dur or T_dur <= 0 or T_dur > 1 or H <= 0:
-        return -np.inf  # Return negative infinity for invalid  values
- 
-    model_flux = trapezoid_model(phase, H, depth, T_dur, T_flat, t0=0.0) # Generate the model flux using the trapezoid model
-    residuals = flux - model_flux # Calculate the residuals between the observed flux and the model flux
-    chi_squared = np.sum((residuals / flux_err) ** 2)
-    log_likelihood_value = -0.5 * chi_squared
-    return log_likelihood_value
+    H, depth, T_dur, T_flat = params
+    model_flux = trapezoid_model(phase, H, depth, T_dur, T_flat, t0=0.0)
+    residuals = flux - model_flux
+    return -0.5 * np.sum((residuals / flux_err) ** 2)
 # Make sure bace line flux is positive and less than 1.2, depth is less than 0.5, T_flat is less than T_dur, and T_dur is positive and less than 0.5
 def log_prior_ta(params):
-    H, depth, T_dur, T_flat = params # Unpack the parameters
+    H, depth, T_dur, T_flat = params
     if 0 < depth < 0.5 and 0 <= T_flat <= T_dur and 0.01 < T_dur < 0.5 and 0 < H < 1.20:
-        return 0.0  # Uniform prior (log(1) = 0)
-    else:
-        return -np.inf  # Return negative infinity for invalid values
+        return 0.0
+    return -np.inf
 def log_posterior(params, phase, flux, flux_err, real_period_days=None):
     n_params = len(params)
     if n_params == 4:
